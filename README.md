@@ -1,35 +1,19 @@
-This tutorial goes through Smart Contract I made for NEAR Challenge #7. See list below of features we will be going through.
+# Tic Tac Toe 
+## Step by Step Guide on building a game on NEAR blockchain
+
+This step by step guide will go through making Tic Tac Toe game on NEAR blockchain with web interface!
+
+You can try it out right now - https://martintale.github.io/near-challenge-11/
 
 # Features
 
-**Candidates**
-
--   Add Candidate
--   Add Candidate - Trump Mode
--   Add Candidate - Hitler Mode
--   Ask Cat to Revive Candidate
--   Remove Candidate
--   View Candidates
-
-**Votes**
-
--   Vote
--   Vote - 360 No Scope Mode
--   Remove Your Vote
--   View Votes
-
-**Election**
-
--   Get Leading Candidate
--   Start New Election
-
-**Utility**
-
--   View Logs
+-   Playable Game
+-   Storing, updating and viewing game state from NEAR blockchain
+-   Web <-> NEAR blockchain interactions
 
 # Setup
 
-1. Follow NEAR Hackaton guide to setup environment - https://docs.near.org/docs/develop/basics/hackathon-startup-guide
+1. Follow NEAR Hackaton guide to setup development environment - https://docs.near.org/docs/develop/basics/hackathon-startup-guide
 2. Clone or download this repository
 3. Update `CONTRACT_NAME` in `src\config.js` with your NEAR account
 4. Install dependencies with the command below
@@ -38,38 +22,106 @@ This tutorial goes through Smart Contract I made for NEAR Challenge #7. See list
 yarn install
 ```
 
+# Run your local version
+
+Call method below
+```
+yarn dev
+```
+and open http://localhost:1234/ in your browser. You should see the whole game running on NEAR testnet with fronted being served from your local dev environment.
+
 # Smart Contract
 
-Essentially, this is a program that runs on blockchain. We will go through my contract step by step after which you should be able to make your own modifications and deploy your version of Voting system.
+Essentially, this is a program (in our case - game server) that runs on blockchain. We will go through Tic Tac Toe contract step by step after which you should be able to make your own modifications and deploy your improved version of Tic Tac Toe or make a whole new game.
 
 # Lets Dig In!
 
 Open up `assembly\main.ts` file right at the beginning I setup few data structures required by our Voting System.
 
-## Candidate class
+## Board class
+We will use this class to create new board for every player and store it on NEAR blockchain.
 
 ```
 @nearBindgen
-class Candidate {
-	avatar: u64;
-	voteCount: number;
-	alive: boolean;
+class Board {
+	cells: string[] = ['', '', '', '', '', '', '', '', ''];
 
-	constructor(public name: string) {
-		this.avatar = context.blockIndex;
-		this.voteCount = 0;
-		this.alive = true;
-	}
+	currentTurnMark: string = 'X';
+
+	winner: string = '';
+```
+
+First line `@nearBindgen` is a special as it allows NEAR serialize our Board objects to be serialized on blockchain.
+
+After that we define few properties (`cells`, `currentTurnMark`, `winner`) our game will use to manage Board state.
+
+In addition, we define several methods on our Board that will help manage its state. Lets go over them one by one.
+
+
+### isFull
+
+Checks if board has been filled.
+
+```
+isFull(): boolean {
+    for (let i = 0; i < this.cells.length; i += 1) {
+        if (this.cells[i] == '') {
+            return false;
+        }
+    }
+
+    return true;
 }
 ```
 
-First line `@nearBindgen` is a special as it allows NEAR serialize our Candidate objects to be serialized on blockchain.
+### cellIsMarked
 
-After that we define few properties (`avatar`, `voteCount`, `alive`) our voting system will use to manage Candidate state. In the constructor we set our default for whenever new Candidate is created.
+Checks if cell in the board has been marked by Player
 
-In addition, we have declared one class property inside the constructor argument list. This is a shorthand to allow that argument to be passed in when object is created, set that properties value.
+```
+cellIsMarked(x: number, y: number): boolean {
+    const cellIndex = this.getCellIndex(x, y);
 
-There is a basic Vote class there as well but nothing different nor important is there but it could be extended with additional information, e.g. when vote was made.
+    if (this.cells[cellIndex] == '') {
+        return false;
+    }
+
+    return true;
+}
+```
+
+### getCellIndex
+
+As we're using one dimensional array to store our Board cell data we need to convert x/y coordinates into cell index that we can use to access correct cell.
+
+```
+getCellIndex(x: number, y: number): i32 {
+	return i32(x + y * 3);
+}
+```
+
+### markCell
+
+When marking a cell we check who's turn it is to add the correct mark to the cell
+
+```
+markCell(x: number, y: number): void {
+    const cellIndex = this.getCellIndex(x, y);
+
+    this.cells[cellIndex] = this.currentTurnMark;
+
+    if (this.currentTurnMark == 'X') {
+        this.currentTurnMark = 'O';
+    } else {
+        this.currentTurnMark = 'X';
+    }
+}
+```
+
+### getWinner
+
+Checks the board to see if a win condition has been reached. If yes, then it return Player mark that won, otherwise, it returns a TIE.
+
 
 ## CallResponse class
 
@@ -80,7 +132,7 @@ When creating backend systems you always want to have a robust and consistent wa
 class CallResponse {
 	constructor(
 		public success: boolean,
-		public messages: string[],
+		public message: string,
 	) {
 
 	}
@@ -88,344 +140,306 @@ class CallResponse {
 ```
 
 `success` property indicates if request was successful to know how and which response to display to user in a user friendly way.
-`messages` in our case explain what went wrong with out request to end user or communicate other information - in our case for entertainment :)
-
-## ActionLog class
-
-All important system should have an ability to track down who changed what in the system. In our case it's who (which user) interacted with our system in what way (voted, added candidate, started a new election).
-
-```
-@nearBindgen
-class ActionLog {
-	constructor(
-		public user: string,
-		public action: string,
-	) {
-
-	}
-}
-```
-
-`user` contains their username and `action` explains what they did.
+`message` in our case explain what went wrong with out request to end user or communicate other information :)
 
 ## Data Storage
 
-In order for system to work and not just forget what it knows after each command is executed we need to preserve that data somewhere. You can read more about `PersistentUnorderedMap` and other storage options here - https://docs.near.org/docs/concepts/data-storage#persistentunorderedmap
+In order for system to work and not just forget what it knows after each command is executed we need to preserve that data somewhere. We store our boards for all Players in `PersistentUnorderedMap`. You can read more about and other storage options here - https://docs.near.org/docs/concepts/data-storage#persistentunorderedmap
 
 ```
-const candidates = new PersistentUnorderedMap<number, Candidate>("m");
-const votes = new PersistentUnorderedMap<string, Vote>("n");
-const logs = new PersistentUnorderedMap<number, ActionLog>("b");
+const boards = new PersistentUnorderedMap<string, Board>("m");
 ```
 
-Important thing to keep in mind is that you need to specify different name (`m`, `n`, `b`) for each one of them. Otherwise, they all will point to the same data causing unexpected results.
+Important thing to keep in mind in case you want to store multiple persistent objects is to specify different name (`
+m`, `n`, `b`) for each one of them. Otherwise, they all will point to the same data causing unexpected results.
 
 ## Helpers
 
 In order to keep the rest of the code cleaner it's often useful to create some helper functions that handle repeated tasks for you.
 
-### Random Number & Boolean Generation
+These kind of functions are very useful in a case where at some point you want to change how they work then you only have to do it in one place instead of digging through the whole code.
 
-In NEAR to work with randomness we need to user `math.randomBuffer` that comes from `near-sdk-core` - https://near.github.io/near-sdk-as/globals.html that returns X amount of random numbers for you to work with.
+### Responses
 
-```
-function randomNumber(min: number = 0, max: number = 100): i32 {
-	const buf = math.randomBuffer(4);
-	return i32(min + (((((0xff & buf[0]) << 24) |
-	((0xff & buf[1]) << 16) |
-	((0xff & buf[2]) << 8) |
-	((0xff & buf[3]) << 0)) as number) % (max - min)
-	));
-}
-
-function randomBoolean(): boolean {
-	return randomNumber(0, 100) >= 50;
-}
-```
-
-To get random boolean value we reuse our existing helper function `randomNumber` for simplicity.
-
-### Responses & Logs
-
-Other common functions I tend to use is `response` and `log`. These wrappers are very useful in a case where at some point you want to change how they work then you only have to do it in one place instead of digging through the whole code.
+Another common function I tend to use is `response` which makes it easy to return your function call responses in a predictable and consistent way.
 
 ```
 function response(messages: string[], success: boolean): CallResponse {
 	return new CallResponse(success, messages)
 }
+```
 
-function log(message: string): void {
-	const logEntries = logs.keys();
-	logs.set(logEntries.length, new ActionLog(
-		context.sender,
-		message,
-	));
+### Creating and Retrieving Player Board
+
+Game related functions that will help us create new or retrieve existing Player boards.
+
+This helper creates and stores fresh Player board in persistent storage for user with `accountId`.
+```
+function createPlayerBoard(accountId: string): Board {
+	const newPlayerBoard = new Board();
+	boards.set(accountId, newPlayerBoard);
+
+	return newPlayerBoard;
 }
 ```
 
-# Add Candidate
-
-First, we need ability to add new candidates to the election.
-
+Player board might not exist so it's possible that it will return `null` instead of player board. In this case we want to create a new board for that player before proceeding.
 ```
-export function addCandidate(name: string): CallResponse {
-	const candidate = new Candidate(name);
-
-	candidates.set(candidates.length, candidate);
-
-	log('Added candidate ' + candidate.name);
-
-	return response([candidate.name + ' successfully added to candidate list!'], true);
+function getPlayerBoard(accountId: string): Board | null {
+	return boards.get(accountId);
 }
 ```
 
-There is only one argument `name` that we require and that's used to initialize a new Candidate. After that we store this candidate in our storage using `candidates.set(candidates.length, candidate)`. First parameter for set method is the key on how we want to identify and later retrieve our candidate. I simply use `candidates.length` which returns number of already existing candidates giving us a unique identifier for our Candidate.
-
-After that we log user action and respond with user friendly message.
-
-# View Candidate
-
-Users will want to know all available candidates and their votes. Thanks to `PersistentUnorderedMap` we can very easily return all our candidates using `candidates.entries()` that creates an array of key/value pairs of our candidates.
-
+Often we just want to get a board whether they have one or not yet. So we combine two above functions into one where we return existing board or create a new one for user with `accountId`.
 ```
-export function viewCandidates(): MapEntry<number, Candidate>[] {
-	return candidates.entries();
+function getOrCreatePlayerBoard(accountId: string): Board {
+	const existingPlayerBoard = getPlayerBoard(accountId);
+
+	if (existingPlayerBoard) {
+		return existingPlayerBoard;
+	}
+
+	return createPlayerBoard(accountId);
 }
 ```
 
-# Vote
+## External Functions
 
-And now, the most important function - ability to vote! This one is a bit more complex so I'll split it in parts.
+These are functions that anyone with NEAR account can call to view data about our game state or manipulate it in some way. It can be done through CLI or in our case from a website using Javascript.
+
+
+### markCell
+
+Main function that lets player mark cell for the current turn mark.
+```
+export function markCell(x: string, y: string): CallResponse {
+	const playerBoard = getOrCreatePlayerBoard(context.sender);
+```
+
+`context.sender` is available on all call requests that indicates which NEAR account is calling this function.
 
 ```
-export function vote(candidateId: string): CallResponse {
-	const candidateIntId = parseInt(candidateId);
-
-	if (votes.contains(context.sen
-	der)) {
-		return response(['You have already voted!'], false);
+	if (playerBoard.cellIsMarked(parseInt(x), parseInt(y))) {
+		return response('Cell is already marked!', false);
 	}
 ```
 
-First, we check if user has already made a vote in the past in current election. If that's the case we respond with error message and mark request as unsuccessful.
+We first need to double check that cell is empty because we don't want Players cheating their way to victory :)
 
 ```
-	const candidate = candidates.get(candidateIntId);
+	const mark = playerBoard.currentTurnMark;
 
-	if (candidate == null) {
-		return response(["Candidate doesn't exist!"], false);
-	}
+	playerBoard.markCell(parseInt(x), parseInt(y));
 ```
 
-Then we check if candidate user is voting for exists in the system. If it doesn't then we again respond with error message.
+Now, we can safely mark the cell in Player chosen location.
 
 ```
-	if (candidate.alive) {
-		candidate.voteCount += 1;
+	if (playerBoard.isFull()) {
+		const winner = playerBoard.getWinner();
 
-		candidates.set(candidateIntId, candidate);
+		playerBoard.winner = winner;
+		boards.set(context.sender, playerBoard);
 
-		votes.set(context.sender, new Vote(candidateIntId));
-
-		log('Voted for ' + candidate.name);
-
-		return response(["Successfully voted for " + candidate.name + "!"], true);
+		if (winner == 'TIE') {
+			return response('Game ended in a tie!', true);
+		} else {
+			return response(winner + ' won the game!', true);
+		}
 ```
 
-Now, that we know user can vote for a valid candidate, we check if candidate is alive. If he is then we increase candidates `voteCount`, save the updated candidate and store information that this user voted for this participant.
-
-After that we log their action and respond with successful request and message.
+In a case where board becomes full - we want to end the game. So we check who the winner is (or if it's a tie) - update board state and respond back to user that game is over.
 
 ```
 	} else {
-		return response([
-			"You can't vote for the dead!",
-			"Or can you?",
-			"No, no, you can't :p",
-		], false);
+		const winner = playerBoard.getWinner();
+
+		if (winner != 'TIE') {
+			playerBoard.winner = winner;
+			boards.set(context.sender, playerBoard);
+	
+			return response(winner + ' won the game!', true);
+		}
+	}
+```
+
+Otherwise, we check if there is a winner even if board is not full. If there is then we mark board as finished and respond back to client who won the game.
+
+```
+	boards.set(context.sender, playerBoard);
+
+	return response('Cell ' + x.toString() + ',' + y.toString() + ' marked with ' + mark + '!', true);
+}
+```
+
+Finally, we update the game board with the new mark if it hasn't been done before because game is not finished yet and respond to client with location and mark that was placed.
+
+### viewBoard
+
+View functions are special because you don't need a NEAR account to access/call them but it's important to note that `context.sender` isn't available either so we need to pass in `accountId` for it to know which board to return.
+
+```
+export function viewBoard(accountId: string): Board | null {
+	return getPlayerBoard(accountId);
+}
+```
+
+### startNewGame
+
+And finally, ability to start a new game - because we want our Players to play through multiple games on a single account.
+
+```
+export function startNewGame(): CallResponse {
+	createPlayerBoard(context.sender);
+
+	return response('New game started!', true);
+}
+```
+
+# Frontend
+
+We have gone through our Smart Contract so lets check out some important parts of our frontend.
+
+In `/src/index.html` you can see the structure of our website/game. It contains two blocks - one for logged in users and one for logged out ones. Logged in users see basic information about the game and can sign in. Signed in users can view the game board and UI, information about which NEAR account they used to login as well messages received from blockchain and ability to sign out.
+
+In `/src/global.css` you will find all the styling for our website/game.
+
+Now, lets have a look at Javascript files that are important for our project and some snippets of core functionality.
+
+In `/src/config.js` you will need to update your NEAR account id as it will be used to deploy your Smart Contract to NEAR blockchain. Rest of the script is just configuration and common urls NEAR SDK uses.
+
+## Utility Functions
+
+You can find some NEAR related utility function in `/src/utils.js`.
+
+`initContract()` function initializes a connection with NEAR wallet and store information about  currently logged in user and their wallet in global variables (e.g. `window.accountId`).
+
+In addition, it sets up necessery functionality for your contract as shown below.
+
+```
+// Initializing our contract APIs by contract name and configuration
+window.contract = await new Contract(
+    window.walletConnection.account(),
+    nearConfig.contractName,
+    {
+        // View methods are read only. They don't modify the state, but usually return some value.
+        viewMethods: [
+            "viewBoard",
+        ],
+        // Change methods can modify the state. But you don't receive the returned value when called.
+        changeMethods: [
+            "markCell",
+            "startNewGame",
+        ],
+        sender: window.walletConnection.account(), // account object to initialize and sign transactions.
+    }
+);
+```
+
+You will have to define your external function from you Smart Contract in `viewMethods` and `changeMethods` arrays for them to be usable with NEAR SDK.
+
+Then there are two more common functions `logout` and `login` which are self explanatory.
+
+## Game Code
+
+We will now have a look at important parts of game code in `/src/index.js`.
+
+
+### Gas
+
+When making `call` (change) requests to blockchain you need to provide gas aka small payment for action you're about to perform. In our case, start a new game or mark a cell.
+
+For simplicity we just define maximum amount of gas you can use per request.
+
+```
+const BOATLOAD_OF_GAS = "300000000000000";
+```
+
+### Loading Indicator
+
+When performing actions on servers or blockchain they don't complete instantly so for better user experience we want to show a loading indicator. We simply replace the content of cell or button with a loading SVG and prevent user from clicking/tapping it twice until request has been executed.
+
+```
+function startLoadingButton(button) {
+	button.innerHTML = LOADING_SVG;
+	button.style.pointerEvents = "none";
+}
+
+function stopLoadingButton(button) {
+	button.style.pointerEvents = "inherit";
+}
+```
+
+### Start New Game
+
+This button is only visible when user's game is over.
+
+As you can see we're using one of the functions we defined in `/src/utils.js`. To start a new game we don't need to pass in any parameters so we provide an empty object `{}`. We make sure that we wait for request to complete before proceeding by prefixing the function call with `await`. When request has been executed we update the response for user to see and update the board state.
+
+```
+startNewGameElement.onclick = async () => {
+	try {
+		startLoadingButton(startNewGameElement);
+		const response = await window.contract.startNewGame(
+			{},
+			BOATLOAD_OF_GAS
+		);
+
+		updateResponse(response.message, response.success);
+		updateBoard();
+		stopLoadingButton(startNewGameElement);
+	} catch (e) {
+		console.log(e);
+		alert(
+			"Something went wrong! " +
+			"Maybe you need to sign out and back in? " +
+			"Check your browser console for more info."
+		);
+		throw e;
 	}
 }
 ```
 
-Finally, if candidate is indeed dead (can happen through other commands in the system) we return a small entertaining joke message and mark request as failed.
+### Update Board
+
+We call this function as soon as user is logged in. If he doesn't have a board yet then `viewBoard` call will return `null` meaning that we need to start a new game before proceeding.
+
+```
+async function updateBoard() {
+	const board = await window.contract.viewBoard({
+		accountId: window.accountId,
+	});
+
+	if (board == null) {
+		try {
+			const response = await window.contract.startNewGame(
+				{},
+				BOATLOAD_OF_GAS
+			);
+	
+			updateResponse(response.message, response.success);
+			updateBoard();
+		} catch (e) {
+			console.log(e);
+			alert(
+				"Something went wrong! " +
+				"Maybe you need to sign out and back in? " +
+				"Check your browser console for more info."
+			);
+			throw e;
+		}
+```
+
+Otherwise, we update the board with its current state received from blockchain and add ability to mark empty cells.
+
+Have a look at `src/index.js` yourself to see how game state is visualized.
+
 
 # That's It Folks!
 
-This covers the basic functionallity of our voting system. If you keep scrolling down in `assembly\main.ts` you will find additional commands to explore and experiment with.
+That covers all the main functionality in our game!
 
-Now that we have gone through the code - we want to build and deploy our voting system to NEAR.
-
-# Build & Deploy
-
-Before you build and deploy your Smart Contract (our Voting System) make sure that you have logged in using NEAR by typing `near login` in console and updating `CONTRACT_NAME` in `src\config.js` with your username as that's where the contract will be deployed.
-
-Now, build the contract by executing command below in root directory of the project.
-
-```
-yarn run build:contract
-```
-
-Then deploy it using command below
-
-```
-near deploy
-```
-
-# Commands
-
-Now, that your Smart Contract is deployed you can call these methods to interact with it.
-
-**IMPORTANT** - replace `near-challenge-7.testnet` and `martint.testnet` with your own username.
-
-## Add Candidate
-
-**Command**
-
-```
-near call near-challenge-7.testnet addCandidate '{ "name": "Trump" }' --accountId martint.testnet --gas 300000000000000
-```
-
-**Result**
-
-```
-{
-  success: true,
-  messages: [ 'Trump successfully added to candidate list!' ]
-}
-```
-
-## View Candidates
-
-**Command**
-
-```
-near view near-challenge-7.testnet viewCandidates
-```
-
-**Result**
-
-```
-[
-  {
-    key: 0,
-    value: { avatar: '72724247', voteCount: 0, alive: true, name: 'Trump' }
-  },
-  {
-    key: 1,
-    value: { avatar: '72724317', voteCount: 3998, alive: true, name: 'Trump Junior' }
-  },
-  {
-    key: 2,
-    value: { avatar: '72724344', voteCount: 1, alive: true, name: 'Martin' }
-  }
-]
-```
-
-## Vote
-
-**Command**
-
-```
-near call near-challenge-7.testnet vote '{ "candidateId": "2" }' --accountId martint.testnet --gas 300000000000000
-```
-
-**Result**
-
-```
-{
-  success: true,
-  messages: [ 'Successfully voted for Martin!' ]
-}
-
-or
-
-{
-  success: false,
-  messages: [ 'You have already voted!' ]
-}
-```
-
-Feel free to go through the rest of the commands/functions in `assembly\main.ts` and see exactly what they do and how they respond here - https://github.com/MartinTale/near-challenge-7/blob/main/DETAILS.md
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Guest Book
-==========
-
-[![Build Status](https://travis-ci.com/near-examples/guest-book.svg?branch=master)](https://travis-ci.com/near-examples/guest-book)
-
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/near-examples/guest-book)
-
-<!-- MAGIC COMMENT: DO NOT DELETE! Everything above this line is hidden on NEAR Examples page -->
-
-Sign in with [NEAR] and add a message to the guest book! A starter app built with an [AssemblyScript] backend and a [React] frontend.
-
-
-Quick Start
-===========
-
-To run this project locally:
-
-1. Prerequisites: Make sure you have Node.js ≥ 12 installed (https://nodejs.org), then use it to install [yarn]: `npm install --global yarn` (or just `npm i -g yarn`)
-2. Run the local development server: `yarn && yarn dev` (see `package.json` for a
-   full list of `scripts` you can run with `yarn`)
-
-Now you'll have a local development environment backed by the NEAR TestNet! Running `yarn dev` will tell you the URL you can visit in your browser to see the app.
-
-
-Exploring The Code
-==================
-
-1. The backend code lives in the `/assembly` folder. This code gets deployed to
-   the NEAR blockchain when you run `yarn deploy:contract`. This sort of
-   code-that-runs-on-a-blockchain is called a "smart contract" – [learn more
-   about NEAR smart contracts][smart contract docs].
-2. The frontend code lives in the `/src` folder.
-   [/src/index.html](/src/index.html) is a great place to start exploring. Note
-   that it loads in `/src/index.js`, where you can learn how the frontend
-   connects to the NEAR blockchain.
-3. Tests: there are different kinds of tests for the frontend and backend. The
-   backend code gets tested with the [asp] command for running the backend
-   AssemblyScript tests, and [jest] for running frontend tests. You can run
-   both of these at once with `yarn test`.
-
-Both contract and client-side code will auto-reload as you change source files.
-
+Now that we have gone through the code - we want to build and deploy our game to NEAR.
 
 Deploy
 ======
