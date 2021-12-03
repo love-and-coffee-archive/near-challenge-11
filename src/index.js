@@ -87,11 +87,11 @@ async function updateBoard() {
 					cellElements[i].classList.toggle('won', true);
 					cellElements[i].classList.toggle('lost', false);
 				}
-				if (board.winner == 'Y') {
+				if (board.winner == 'O') {
 					cellElements[i].classList.toggle('won', false);
 					cellElements[i].classList.toggle('lost', true);
 				}
-			} else if (cell == 'Y') {
+			} else if (cell == 'O') {
 				cellElements[i].innerHTML = '⭕';
 				cellElements[i].classList.toggle('empty', false);
 				
@@ -99,7 +99,7 @@ async function updateBoard() {
 					cellElements[i].classList.toggle('won', false);
 					cellElements[i].classList.toggle('lost', true);
 				}
-				if (board.winner == 'Y') {
+				if (board.winner == 'O') {
 					cellElements[i].classList.toggle('won', true);
 					cellElements[i].classList.toggle('lost', false);
 				}
@@ -138,13 +138,13 @@ async function updateBoard() {
 
 		if (board.winner == 'X') {
 			messageElement.innerHTML = "❌ won!";
-		} else if (board.winner == 'Y') {
+		} else if (board.winner == 'O') {
 			messageElement.innerHTML = "⭕ won!";
 		} else if (board.winner == 'TIE') {
 			messageElement.innerHTML = "It's a tie!";
 		} else if (board.currentTurnMark == 'X') {
 			messageElement.innerHTML = "It's ❌ turn";
-		} else if (board.currentTurnMark == 'Y') {
+		} else if (board.currentTurnMark == 'O') {
 			messageElement.innerHTML = "It's ⭕ turn";
 		}
 

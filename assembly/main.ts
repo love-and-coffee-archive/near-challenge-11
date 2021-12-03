@@ -41,14 +41,14 @@ class Board {
 		this.cells[cellIndex] = this.currentTurnMark;
 
 		if (this.currentTurnMark == 'X') {
-			this.currentTurnMark = 'Y';
+			this.currentTurnMark = 'O';
 		} else {
 			this.currentTurnMark = 'X';
 		}
 	}
 
 	getWinner(): string {
-		const players = ['X', 'Y'];
+		const players = ['X', 'O'];
 
 		for (let i = 0; i < players.length; i += 1) {
 			const playerMark = players[i];
